@@ -1,0 +1,28 @@
+{
+  "claim_id": "TASK-XXX-claim-TIMESTAMP",
+  "task_id": "TASK-XXX",
+  "agent_id": "implementer-TIMESTAMP",
+  "role": "implementer",
+  "timestamp": "2025-11-23T00:00:00Z",
+  "summary": "Brief summary of what was implemented",
+  "files_modified": [
+    "src/module.py",
+    "tests/test_module.py"
+  ],
+  "test_command": "pytest tests --randomly-seed=42",
+  "test_seed": 42,
+  "test_results": {
+    "tests_run": 15,
+    "tests_passed": 15,
+    "tests_failed": 0,
+    "duration_seconds": 3.2
+  },
+  "evidence_files": [
+    "git_status.txt",
+    "changes.diff",
+    "test_output.txt"
+  ],
+  "evidence_sha256": "HASH_OF_ALL_EVIDENCE_FILES",
+  "confidence": 0.85,
+  "notes": "Implementation complete. All tests passing. Ready for review."
+}

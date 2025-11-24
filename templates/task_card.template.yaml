@@ -1,0 +1,34 @@
+task_id: TASK-YYYYMMDD-NNNN
+title: Brief task title
+description: |
+  Detailed description of what needs to be done.
+
+  Include:
+  - Context and motivation
+  - Specific requirements
+  - Expected outcomes
+
+role: implementer  # or: architect, reviewer, integrator, tester, monitor
+status: available  # or: claimed, completed
+priority: medium   # or: low, high
+
+files_in_scope:
+  - "src/**/*.py"
+  - "tests/**/*.py"
+
+acceptance_criteria:
+  - "Unit tests pass"
+  - "Integration tests pass"
+  - "Code review approved"
+  - "Independent re-execution successful"
+
+dependencies: []
+# List task IDs that must be completed first
+
+created_at: "2025-11-23T00:00:00Z"
+created_by: architect-001
+
+claimed_by: null
+claimed_at: null
+completed_at: null
+worktree_path: null

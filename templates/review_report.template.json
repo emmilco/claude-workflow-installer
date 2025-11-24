@@ -1,0 +1,21 @@
+{
+  "review_id": "TASK-XXX-review-TIMESTAMP",
+  "task_id": "TASK-XXX",
+  "reviewer_id": "reviewer-TIMESTAMP",
+  "timestamp": "2025-11-23T00:00:00Z",
+  "verdict": "approved",
+  "confidence": 0.85,
+  "issues": [],
+  "suggestions": [
+    "Consider adding helper function for repeated logic"
+  ],
+  "alternatives": [],
+  "security_concerns": [],
+  "performance_notes": [],
+  "test_assessment": {
+    "coverage": "good",
+    "quality": "high",
+    "gaps": []
+  },
+  "review_notes": "Clean implementation with good test coverage. Approved for merge."
+}
