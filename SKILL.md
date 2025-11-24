@@ -35,6 +35,23 @@ This skill activates when you discuss:
 - Monitoring workflow health
 - Evolving role prompts based on outcomes
 
+## Template Files Location
+
+All workflow template files (scripts, prompts, hooks, templates) are installed globally at:
+```
+~/.claude/skills/multi-agent-workflow/
+├── scripts/
+│   ├── core/
+│   ├── worktree/
+│   ├── ci/
+│   └── evolution/
+├── prompts/
+├── hooks/
+└── templates/
+```
+
+When setting up a project, copy files from this location to the project's `.workflow/` directory.
+
 ## Core Concepts
 
 ### 1. Task-Based Workflow
@@ -247,10 +264,49 @@ After installation, your project will have:
 
 ## Typical Workflow
 
-### 1. Setup (One-time)
+### 1. Setup (One-time per project)
+
+When setting up the workflow in a new project, copy the template files:
+
 ```bash
-# Install the workflow
-bash install.sh
+# Navigate to your project
+cd /path/to/your/project
+
+# Create workflow directory structure
+mkdir -p .workflow/{scripts,prompts,hooks,templates,monitoring,evidence,task_cards}
+mkdir -p .workflow/scripts/{core,worktree,ci,evolution}
+mkdir -p .workflow/prompts/archive
+mkdir -p worktrees
+
+# Copy template files from global installation
+cp -r ~/.claude/skills/multi-agent-workflow/scripts/* .workflow/scripts/
+cp -r ~/.claude/skills/multi-agent-workflow/prompts/* .workflow/prompts/
+cp -r ~/.claude/skills/multi-agent-workflow/hooks/* .workflow/hooks/
+cp -r ~/.claude/skills/multi-agent-workflow/templates/* .workflow/templates/
+
+# Make scripts executable
+find .workflow/scripts -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} +
+find .workflow/hooks -type f -name "*.sh" -exec chmod +x {} +
+
+# Initialize state files
+touch TASKS.jsonl
+
+cat > IN_PROGRESS.md <<'EOF'
+# In Progress Tasks
+
+**Max Concurrent: 6**
+
+| Task ID | Agent ID | Role | Claimed At | Worktree | Status |
+|---------|----------|------|------------|----------|--------|
+EOF
+
+cat > DECISIONS.md <<'EOF'
+# Decision Log
+
+All architectural and implementation decisions are recorded here with evidence and rationale.
+
+---
+EOF
 
 # Create initial tasks (as Architect)
 python3 .workflow/scripts/core/task_manager.py create-task \
@@ -277,20 +333,51 @@ cd worktrees/TASK-001
 # Commit changes
 
 # Submit for review
-bash ../workflow/scripts/worktree/submit_for_review.sh TASK-001
+bash .workflow/scripts/worktree/submit_for_review.sh TASK-001
 ```
 
-### 4. Review
+### 4. Review Process
+
+The reviewer workflow has three phases: setup, examination, and decision.
+
+#### Phase 1: Setup
 ```bash
-# Back in main repo
+# Back in main repo (not in worktree)
 cd ../../
 
-# Spawn reviewer
+# Spawn reviewer - loads evidence and prepares review context
 bash .workflow/scripts/worktree/spawn_reviewer.sh TASK-001
+```
 
-# Reviewer examines evidence and code
-# Makes decision
+#### Phase 2: Examination
+
+Reviewers work in the **implementer's worktree** to examine the actual code:
+
+```bash
+# Navigate to the implementer's worktree
+cd worktrees/TASK-001
+
+# Review the code changes
+git diff main
+
+# Examine evidence
+cat ../../.workflow/evidence/TASK-001/implementer_claim.json
+
+# Re-run tests to verify
+pytest tests/ --randomly-seed=42
+
+# Return to main repo
+cd ../../
+```
+
+#### Phase 3: Decision
+
+```bash
+# Approve (merges to main)
 bash .workflow/scripts/worktree/complete_review.sh TASK-001 approved "Great work"
+
+# OR reject (returns task to available)
+bash .workflow/scripts/worktree/complete_review.sh TASK-001 rejected "Needs fixes"
 ```
 
 ### 5. Monitor Health

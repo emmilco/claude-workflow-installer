@@ -1,0 +1,6 @@
+{
+  "hooks": {
+    "PreToolUse": ".workflow/hooks/pre_tool_use.sh",
+    "Stop": ".workflow/hooks/stop_gate.sh"
+  }
+}

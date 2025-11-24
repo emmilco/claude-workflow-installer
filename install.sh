@@ -2,117 +2,94 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_DIR="${1:-.}"
+SKILL_DIR="$HOME/.claude/skills/multi-agent-workflow"
 
 echo "==================================="
 echo "Multi-Agent Workflow Installer v3"
 echo "==================================="
 echo ""
 
-# Check if target directory exists
-if [ ! -d "$TARGET_DIR" ]; then
-    echo "Error: Target directory '$TARGET_DIR' does not exist"
+# Check for required dependencies
+echo "Checking dependencies..."
+
+if ! command -v jq &> /dev/null; then
+    echo "ERROR: jq is required but not installed."
+    echo ""
+    echo "Please install jq:"
+    echo "  macOS:   brew install jq"
+    echo "  Ubuntu:  sudo apt-get install jq"
+    echo "  Fedora:  sudo dnf install jq"
+    echo ""
+    exit 1
+fi
+echo "✓ jq found"
+
+if ! command -v git &> /dev/null; then
+    echo "ERROR: git is required but not installed."
     exit 1
 fi
 
-cd "$TARGET_DIR"
+# Check git version (need 2.25+ for worktree support)
+GIT_VERSION=$(git --version | awk '{print $3}')
+GIT_MAJOR=$(echo "$GIT_VERSION" | cut -d. -f1)
+GIT_MINOR=$(echo "$GIT_VERSION" | cut -d. -f2)
 
-echo "Installing to: $(pwd)"
+if [ "$GIT_MAJOR" -lt 2 ] || ([ "$GIT_MAJOR" -eq 2 ] && [ "$GIT_MINOR" -lt 25 ]); then
+    echo "ERROR: Git 2.25+ required (found $GIT_VERSION)"
+    echo "Please upgrade git for worktree support"
+    exit 1
+fi
+echo "✓ git $GIT_VERSION"
+
+if ! command -v python3 &> /dev/null; then
+    echo "ERROR: python3 is required but not installed."
+    exit 1
+fi
+echo "✓ python3 found"
 echo ""
 
-# Create directory structure
-echo "Creating directory structure..."
-mkdir -p .workflow/{scripts,prompts,hooks,templates,monitoring,evidence,task_cards}
-mkdir -p .workflow/scripts/{core,worktree,ci,evolution}
-mkdir -p .workflow/prompts/archive
-mkdir -p worktrees
-
-# Copy scripts
-echo "Copying scripts..."
-cp -r "$SCRIPT_DIR/scripts/"* .workflow/scripts/
-
-# Copy prompts
-echo "Copying role prompts..."
-cp -r "$SCRIPT_DIR/prompts/"* .workflow/prompts/
-
-# Copy hooks
-echo "Copying hooks..."
-cp -r "$SCRIPT_DIR/hooks/"* .workflow/hooks/
-
-# Copy templates
-echo "Copying templates..."
-cp -r "$SCRIPT_DIR/templates/"* .workflow/templates/
-
-# Make scripts executable
-echo "Setting permissions..."
-chmod +x .workflow/scripts/**/*.sh
-chmod +x .workflow/scripts/**/*.py
-chmod +x .workflow/hooks/*.sh
-
-# Initialize state files
-echo "Initializing state files..."
-
-if [ ! -f "TASKS.jsonl" ]; then
-    touch TASKS.jsonl
-    echo "Created TASKS.jsonl"
-fi
-
-if [ ! -f "IN_PROGRESS.md" ]; then
-    cat > IN_PROGRESS.md <<'EOF'
-# In Progress Tasks
-
-**Max Concurrent: 6**
-
-| Task ID | Agent ID | Role | Claimed At | Worktree | Status |
-|---------|----------|------|------------|----------|--------|
-EOF
-    echo "Created IN_PROGRESS.md"
-fi
-
-if [ ! -f "DECISIONS.md" ]; then
-    cat > DECISIONS.md <<'EOF'
-# Decision Log
-
-All architectural and implementation decisions are recorded here with evidence and rationale.
-
----
-EOF
-    echo "Created DECISIONS.md"
-fi
+# Create skill directory structure
+echo "Creating skill directory structure..."
+mkdir -p "$SKILL_DIR"/{scripts,prompts,hooks,templates}
+mkdir -p "$SKILL_DIR"/scripts/{core,worktree,ci,evolution}
+mkdir -p "$SKILL_DIR"/prompts/archive
 
 # Install Claude Code skill
 echo "Installing Claude Code skill..."
-mkdir -p .claude/skills
-cp "$SCRIPT_DIR/SKILL.md" .claude/skills/multi-agent-workflow.md
+cp "$SCRIPT_DIR/SKILL.md" ~/.claude/skills/multi-agent-workflow.md
+echo "✓ Skill installed to ~/.claude/skills/multi-agent-workflow.md"
+echo ""
 
-# Configure hooks (optional - ask user)
-read -p "Configure Claude Code hooks for workflow enforcement? (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    if [ ! -f ".claude/settings.json" ]; then
-        cat > .claude/settings.json <<'EOF'
-{
-  "hooks": {
-    "PreToolUse": ".workflow/hooks/pre_tool_use.sh",
-    "Stop": ".workflow/hooks/stop_gate.sh"
-  }
-}
-EOF
-        echo "Created .claude/settings.json with hooks"
-    else
-        echo "Warning: .claude/settings.json already exists. Please manually add hooks:"
-        echo '  "PreToolUse": ".workflow/hooks/pre_tool_use.sh"'
-        echo '  "Stop": ".workflow/hooks/stop_gate.sh"'
-    fi
-fi
+# Copy reference files adjacent to skill
+echo "Installing workflow files..."
+
+# Copy scripts
+cp -r "$SCRIPT_DIR/scripts/"* "$SKILL_DIR/scripts/"
+
+# Copy prompts
+cp -r "$SCRIPT_DIR/prompts/"* "$SKILL_DIR/prompts/"
+
+# Copy hooks
+cp -r "$SCRIPT_DIR/hooks/"* "$SKILL_DIR/hooks/"
+
+# Copy templates
+cp -r "$SCRIPT_DIR/templates/"* "$SKILL_DIR/templates/"
+
+# Make scripts executable
+echo "Setting permissions..."
+find "$SKILL_DIR/scripts" -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} +
+find "$SKILL_DIR/hooks" -type f -name "*.sh" -exec chmod +x {} +
+
+echo "✓ Workflow files installed to $SKILL_DIR"
+echo ""
 
 # Install Python dependencies
-echo ""
-read -p "Install Python dependencies? (requires pip) (y/n) " -n 1 -r
+read -p "Install Python dependencies globally? (requires pip) (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     if command -v pip3 &> /dev/null; then
         pip3 install -r "$SCRIPT_DIR/requirements.txt" || echo "Warning: Some dependencies failed to install"
+        echo "✓ Python dependencies installed"
     else
         echo "Warning: pip3 not found. Please manually install dependencies from requirements.txt"
     fi
@@ -123,12 +100,12 @@ echo "==================================="
 echo "Installation Complete!"
 echo "==================================="
 echo ""
-echo "Next steps:"
-echo "1. Review .workflow/prompts/ to customize role behaviors"
-echo "2. Create your first task: python3 .workflow/scripts/core/task_manager.py create-task --title 'Your task'"
-echo "3. Spawn an agent: bash .workflow/scripts/worktree/spawn_agent.sh architect"
-echo "4. Read docs: cat .workflow/docs/USAGE.md"
+echo "The multi-agent workflow skill is now globally available in Claude Code."
 echo ""
-echo "To start the self-healing monitor:"
-echo "  python3 .workflow/scripts/evolution/self_healing_monitor.py --daemon"
+echo "Installation location:"
+echo "  Skill: ~/.claude/skills/multi-agent-workflow.md"
+echo "  Files: $SKILL_DIR"
+echo ""
+echo "To use the workflow in a project, activate the skill in Claude Code"
+echo "and it will set up the necessary structure in your project."
 echo ""

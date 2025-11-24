@@ -13,13 +13,42 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 import subprocess
 import sys
+import fcntl
+
+
+def find_project_root(start_path: Path = None) -> Path:
+    """
+    Find the project root by searching for .git directory.
+    This allows scripts to be run from anywhere in the project, including worktrees.
+    """
+    current = start_path or Path.cwd()
+
+    # Walk up the directory tree looking for .git
+    for parent in [current] + list(current.parents):
+        git_dir = parent / '.git'
+        if git_dir.exists():
+            # If .git is a directory, we found the main repo
+            if git_dir.is_dir():
+                return parent
+            # If .git is a file, we're in a worktree - read it to find main repo
+            elif git_dir.is_file():
+                git_file_content = git_dir.read_text().strip()
+                # Format: "gitdir: /path/to/main/repo/.git/worktrees/name"
+                if git_file_content.startswith('gitdir: '):
+                    gitdir_path = git_file_content.replace('gitdir: ', '')
+                    # Navigate from .git/worktrees/name back to main repo
+                    main_repo = Path(gitdir_path).parent.parent.parent
+                    return main_repo
+
+    # Fallback to cwd if no .git found
+    return Path.cwd()
 
 
 class TaskManager:
     """Manages task lifecycle and agent coordination"""
 
     def __init__(self, root_dir: Path = None):
-        self.root_dir = root_dir or Path.cwd()
+        self.root_dir = root_dir or find_project_root()
         self.tasks_file = self.root_dir / "TASKS.jsonl"
         self.in_progress_file = self.root_dir / "IN_PROGRESS.md"
         self.decisions_file = self.root_dir / "DECISIONS.md"
@@ -44,17 +73,28 @@ class TaskManager:
         return tasks
 
     def _write_task(self, task: Dict[str, Any]):
-        """Append or update task in TASKS.jsonl"""
-        tasks = self._read_tasks()
+        """Append or update task in TASKS.jsonl with file locking for atomicity"""
+        # Use a lock file to ensure atomic operations
+        lock_file = self.tasks_file.parent / '.tasks.lock'
+        lock_file.touch(exist_ok=True)
 
-        # Remove existing task with same ID
-        tasks = [t for t in tasks if t['task_id'] != task['task_id']]
-        tasks.append(task)
+        with open(lock_file, 'w') as lockf:
+            # Acquire exclusive lock
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+            try:
+                tasks = self._read_tasks()
 
-        # Rewrite entire file (ensures consistency)
-        with open(self.tasks_file, 'w') as f:
-            for t in tasks:
-                f.write(json.dumps(t) + '\n')
+                # Remove existing task with same ID
+                tasks = [t for t in tasks if t['task_id'] != task['task_id']]
+                tasks.append(task)
+
+                # Rewrite entire file (ensures consistency)
+                with open(self.tasks_file, 'w') as f:
+                    for t in tasks:
+                        f.write(json.dumps(t) + '\n')
+            finally:
+                # Release lock
+                fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
 
     def _read_in_progress(self) -> List[Dict[str, Any]]:
         """Parse IN_PROGRESS.md table"""
@@ -167,25 +207,39 @@ class TaskManager:
             print(f"ERROR: Failed to create worktree: {e.stderr.decode()}", file=sys.stderr)
             return None
 
-        # Update task status
-        task['status'] = 'claimed'
-        task['claimed_by'] = agent_id
-        task['claimed_at'] = datetime.now().isoformat()
-        task['worktree_path'] = str(worktree_path)
-        self._write_task(task)
+        # Update task status (with cleanup on failure)
+        try:
+            task['status'] = 'claimed'
+            task['claimed_by'] = agent_id
+            task['claimed_at'] = datetime.now().isoformat()
+            task['worktree_path'] = str(worktree_path)
+            self._write_task(task)
 
-        # Add to IN_PROGRESS.md
-        in_progress.append({
-            'task_id': task_id,
-            'agent_id': agent_id,
-            'role': role,
-            'claimed_at': datetime.now(),
-            'worktree_path': str(worktree_path),
-            'status': 'in_progress'
-        })
-        self._update_in_progress(in_progress)
+            # Add to IN_PROGRESS.md
+            in_progress.append({
+                'task_id': task_id,
+                'agent_id': agent_id,
+                'role': role,
+                'claimed_at': datetime.now(),
+                'worktree_path': str(worktree_path),
+                'status': 'in_progress'
+            })
+            self._update_in_progress(in_progress)
 
-        return str(worktree_path)
+            return str(worktree_path)
+        except Exception as e:
+            # Cleanup worktree if state update fails
+            print(f"ERROR: Failed to update task state: {e}", file=sys.stderr)
+            print(f"Cleaning up worktree at {worktree_path}", file=sys.stderr)
+            try:
+                subprocess.run(
+                    ['git', 'worktree', 'remove', str(worktree_path), '--force'],
+                    check=True,
+                    capture_output=True
+                )
+            except subprocess.CalledProcessError as cleanup_err:
+                print(f"WARNING: Failed to cleanup worktree: {cleanup_err.stderr.decode()}", file=sys.stderr)
+            return None
 
     def complete_task(self, task_id: str, verdict: str, review_notes: str = "") -> bool:
         """

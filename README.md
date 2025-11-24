@@ -15,21 +15,96 @@ A production-ready, self-healing, self-updating multi-agent workflow system for 
 
 ## Quick Start
 
-### Installation
+### Installation (Two Steps)
+
+The workflow system has two parts: **global installation** (one-time) and **per-project setup**.
+
+#### Step 1: Global Installation (One-Time)
+
+Install the workflow system globally so it's available to all your projects:
 
 ```bash
 # Clone or download this workflow package
-cd /path/to/your/project
+cd /path/to/workflow_installer
 
-# Run installer
-bash /path/to/workflow_v3/install.sh .
+# Run global installer
+bash install.sh
 ```
 
-This will:
-1. Create `.workflow/` directory with all scripts and prompts
-2. Set up `TASKS.jsonl`, `IN_PROGRESS.md`, and `DECISIONS.md`
-3. Install the Claude Code skill
-4. Configure hooks (optional)
+This installs:
+- Claude Code skill to `~/.claude/skills/multi-agent-workflow.md`
+- Workflow files to `~/.claude/skills/multi-agent-workflow/`
+- Checks for required dependencies (jq, git, python3)
+
+#### Step 2: Per-Project Setup
+
+For each project where you want to use the workflow:
+
+```bash
+# Navigate to your project
+cd /path/to/your/project
+
+# Run project setup script
+bash /path/to/workflow_installer/scripts/setup_project.sh
+```
+
+Or manually:
+```bash
+cd /path/to/your/project
+
+# Create directory structure
+mkdir -p .workflow/{scripts,prompts,hooks,templates,monitoring,evidence}
+mkdir -p .workflow/scripts/{core,worktree,evolution}
+mkdir -p .workflow/prompts/archive
+mkdir -p worktrees
+
+# Copy files from global installation
+cp -r ~/.claude/skills/multi-agent-workflow/scripts/* .workflow/scripts/
+cp -r ~/.claude/skills/multi-agent-workflow/prompts/* .workflow/prompts/
+cp -r ~/.claude/skills/multi-agent-workflow/hooks/* .workflow/hooks/
+cp -r ~/.claude/skills/multi-agent-workflow/templates/* .workflow/templates/
+
+# Make executable
+find .workflow/scripts -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} +
+
+# Initialize state files
+touch TASKS.jsonl
+cat > IN_PROGRESS.md <<'EOF'
+# In Progress Tasks
+
+**Max Concurrent: 6**
+
+| Task ID | Agent ID | Role | Claimed At | Worktree | Status |
+|---------|----------|------|------------|----------|--------|
+EOF
+
+# Add to .gitignore
+cat >> .gitignore <<'EOF'
+# Multi-Agent Workflow
+TASKS.jsonl
+IN_PROGRESS.md
+.tasks.lock
+worktrees/
+.workflow/evidence/
+.workflow/monitoring/
+EOF
+
+# Commit
+git add .workflow .gitignore IN_PROGRESS.md
+git commit -m "Set up multi-agent workflow"
+```
+
+#### Validate Setup
+
+```bash
+bash scripts/validate_system.sh
+```
+
+This checks:
+- Required dependencies installed
+- Directory structure correct
+- Scripts executable
+- State files valid
 
 ### Create Your First Task
 
@@ -283,12 +358,25 @@ your-project/
 
 ## Requirements
 
+**Required:**
 - Python 3.7+
 - Git 2.25+ (for worktree support)
 - Bash shell
-- jq (for JSON processing in shell scripts)
+- **jq** (for JSON processing in shell scripts)
 
-Optional:
+To install jq:
+```bash
+# macOS
+brew install jq
+
+# Ubuntu/Debian
+sudo apt-get install jq
+
+# Fedora/RHEL
+sudo dnf install jq
+```
+
+**Optional:**
 - pytest (for Python projects)
 - npm (for JavaScript projects)
 
@@ -347,26 +435,128 @@ find .workflow/scripts -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x
 
 ### CI/CD Integration
 
-Add to your CI pipeline:
+Add workflow health checks to your CI pipeline that fail the build if issues are detected:
 
 ```yaml
 # .github/workflows/workflow-health.yml
 name: Workflow Health Check
 
-on: [push, schedule]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
 
 jobs:
   health:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Check Workflow Health
-        run: python3 .workflow/scripts/evolution/self_healing_monitor.py
-      - name: Upload Dashboard
-        uses: actions/upload-artifact@v2
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          name: health-dashboard
-          path: .workflow/monitoring/DASHBOARD.md
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Validate workflow setup
+        run: |
+          if [ -f "scripts/validate_system.sh" ]; then
+            bash scripts/validate_system.sh
+          else
+            echo "⚠ Validation script not found, skipping"
+          fi
+
+      - name: Check workflow health
+        id: health_check
+        run: |
+          python3 .workflow/scripts/evolution/self_healing_monitor.py > health_output.txt
+          cat health_output.txt
+
+          # Extract health score (if available)
+          if grep -q "Health score:" health_output.txt; then
+            HEALTH_SCORE=$(grep "Health score:" health_output.txt | awk '{print $3}')
+            echo "health_score=$HEALTH_SCORE" >> $GITHUB_OUTPUT
+
+            # Fail if health score is below threshold
+            if (( $(echo "$HEALTH_SCORE < 0.6" | bc -l) )); then
+              echo "❌ Health score $HEALTH_SCORE is below threshold (0.6)"
+              exit 1
+            fi
+          fi
+
+      - name: Check for stale tasks
+        run: |
+          STALE_COUNT=$(python3 .workflow/scripts/core/task_manager.py detect-stale | wc -l)
+          echo "Stale tasks: $STALE_COUNT"
+
+          if [ "$STALE_COUNT" -gt 5 ]; then
+            echo "❌ Too many stale tasks ($STALE_COUNT > 5)"
+            exit 1
+          fi
+
+      - name: Check for orphaned worktrees
+        run: |
+          if [ -d "worktrees" ]; then
+            FS_WORKTREES=$(ls -1 worktrees/ 2>/dev/null | wc -l || echo 0)
+            TRACKED_WORKTREES=$(grep "TASK-" IN_PROGRESS.md 2>/dev/null | wc -l || echo 0)
+
+            ORPHANED=$((FS_WORKTREES - TRACKED_WORKTREES))
+            echo "Orphaned worktrees: $ORPHANED"
+
+            if [ "$ORPHANED" -gt 3 ]; then
+              echo "❌ Too many orphaned worktrees ($ORPHANED > 3)"
+              exit 1
+            fi
+          fi
+
+      - name: Upload dashboard
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: workflow-health-dashboard
+          path: |
+            .workflow/monitoring/DASHBOARD.md
+            .workflow/monitoring/health-*.json
+          retention-days: 30
+
+      - name: Comment on PR (if health issues)
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ Workflow health check failed. Please review the workflow system health before merging.'
+            })
+```
+
+**Key improvements:**
+- ✅ Fails build if health score < 0.6
+- ✅ Fails if too many stale tasks (>5)
+- ✅ Fails if too many orphaned worktrees (>3)
+- ✅ Runs validation script
+- ✅ Comments on PRs with health issues
+- ✅ Uploads dashboard as artifact
+
+**Alternative: Fail on any workflow errors**
+
+```yaml
+      - name: Check workflow health (strict)
+        run: |
+          # Run monitor and capture exit code
+          python3 .workflow/scripts/evolution/self_healing_monitor.py --strict
+
+          # --strict flag makes monitor exit 1 if any issues detected
+          # Add this to self_healing_monitor.py to enable
 ```
 
 ### Custom Metrics
@@ -410,13 +600,70 @@ For issues, questions, or contributions:
 
 This workflow system is provided as-is for use in software projects.
 
+## Documentation
+
+- **[README.md](README.md)** (this file) - Complete usage guide
+- **[QUICK_START.md](QUICK_START.md)** - 10-minute getting started guide
+- **[SKILL.md](SKILL.md)** - Claude Code skill documentation
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Technical internals and design decisions
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and recovery procedures
+- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - How to test the workflow system
+- **[EXAMPLES.md](EXAMPLES.md)** - Complete walkthroughs with sample data
+- **[MIGRATION.md](MIGRATION.md)** - Upgrade guide and version history
+
 ## Changelog
 
+### v3.1.0 (2025-11-23)
+
+**Critical Fixes:**
+- Fixed path errors in SKILL.md:336 and spawn_agent.sh:116
+- Added file locking for atomic task claiming (prevents race conditions)
+- Added automatic project root detection (works from worktrees)
+- Added worktree cleanup on claim failure
+- Added jq dependency check in install.sh
+
+**New Features:**
+- Automated project setup script (`scripts/setup_project.sh`)
+- System validation script (`scripts/validate_system.sh`)
+- Comprehensive troubleshooting guide
+- Complete testing guide with unit/integration/stress tests
+- Detailed examples with actual data walkthrough
+- Migration guide for upgrades
+
+**New Documentation:**
+- ARCHITECTURE.md - Technical internals, design decisions, cost considerations
+- TROUBLESHOOTING.md - Common issues, failure scenarios, recovery procedures
+- TESTING_GUIDE.md - How to test the workflow system itself
+- EXAMPLES.md - Concrete walkthroughs with sample TASKS.jsonl entries
+- MIGRATION.md - Upgrade guide and version history
+
+**Improvements:**
+- Clarified "agent spawning" terminology (workspace setup, not automation)
+- Added cost warnings for parallel agents ($6-180/day for 6 agents)
+- Redesigned SHA256 verification strategy (handles non-determinism)
+- Complete task state model documentation (including rejected state)
+- Security considerations documented
+- Integrator vs Tester role distinction clarified
+- Task cards directory purpose documented
+- Installation process reconciled (global vs per-project)
+- CI/CD integration now fails builds on health issues
+- Improved error messages throughout
+
+**Technical Improvements:**
+- File locking prevents double-claim race conditions
+- Project root auto-detection from worktrees
+- Worktree cleanup on error
+- Better error handling in all scripts
+- Validation script checks full system health
+
 ### v3.0.0 (2025-11-23)
-- Initial release with all core features
+
+**Initial release:**
 - Git worktree isolation
+- Task state management (TASKS.jsonl)
 - Evidence-based verification
 - Self-healing monitor
 - Prompt evolution system
-- Six specialized roles
+- Six specialized roles (Architect, Implementer, Reviewer, Integrator, Tester, Monitor)
+- Role prompts (~200-400 lines each)
 - Comprehensive documentation

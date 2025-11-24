@@ -1,0 +1,35 @@
+# Multi-Agent Workflow - State Files
+# These files should NOT be committed as they contain runtime state
+# that is specific to each installation and should not be shared
+
+# Task state files (runtime state)
+TASKS.jsonl
+IN_PROGRESS.md
+.tasks.lock
+
+# Worktrees directory (git worktrees, not part of main repo)
+worktrees/
+
+# Evidence directory (task-specific outputs)
+.workflow/evidence/
+
+# Monitoring outputs (runtime metrics)
+.workflow/monitoring/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
