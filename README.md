@@ -4,14 +4,14 @@ A production-ready, self-healing, self-updating multi-agent workflow system for 
 
 ## Features
 
-✅ **Git Worktree Isolation** - Each agent works in a separate worktree, preventing file conflicts
-✅ **Evidence-Based Verification** - SHA256 hashing and independent re-execution validate all claims
-✅ **Self-Healing** - Automatic cleanup of stale tasks and orphaned worktrees
-✅ **Self-Updating** - Prompt evolution based on empirical performance data
-✅ **Role-Based Agents** - Specialized prompts for Architect, Implementer, Reviewer, Integrator, Tester, Monitor
-✅ **Task Management** - Full lifecycle tracking from creation to completion
-✅ **Health Monitoring** - Real-time metrics and alerts for workflow health
-✅ **Portable** - Easy installation into any git repository
+- ✅ **Git Worktree Isolation** - Each agent works in a separate worktree, preventing file conflicts
+- ✅ **Evidence-Based Verification** - SHA256 hashing and independent re-execution validate all claims
+- ✅ **Self-Healing** - Automatic cleanup of stale tasks and orphaned worktrees
+- ✅ **Self-Updating** - Prompt evolution based on empirical performance data
+- ✅ **Role-Based Agents** - Specialized prompts for Architect, Implementer, Reviewer, Integrator, Tester, Monitor
+- ✅ **Task Management** - Full lifecycle tracking from creation to completion
+- ✅ **Health Monitoring** - Real-time metrics and alerts for workflow health
+- ✅ **Portable** - Easy installation into any git repository
 
 ## Quick Start
 
@@ -330,8 +330,7 @@ python3 .workflow/scripts/evolution/evolve_prompts.py propose --role <role>
 **Cause:** Scripts not executable
 **Solution:** Make scripts executable:
 ```bash
-chmod +x .workflow/scripts/**/*.sh
-chmod +x .workflow/scripts/**/*.py
+find .workflow/scripts -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} +
 ```
 
 ## Best Practices
